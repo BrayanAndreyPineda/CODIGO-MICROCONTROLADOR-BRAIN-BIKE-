@@ -1,0 +1,396 @@
+#include <Wire.h>
+#include <Adafruit_MCP23X17.h>
+#include <BluetoothSerial.h>
+
+// Inicialización MCP23017.
+Adafruit_MCP23X17 mcp1;
+Adafruit_MCP23X17 mcp2;
+
+// Inicialización Bluetooth.
+BluetoothSerial SerialBT;
+
+// Declaración de pines
+// MCP23017 1
+const int botsBici1[4] = { 0, 1, 2, 3 };      // PULSADORES DE BICI 1
+const int ledsBici1[4] = { 8, 9, 10, 11 };    // LEDS DE BICI 1
+const int botsBici2[4] = { 4, 5, 6, 7 };      // PULSADORES DE BICI 2
+const int ledsBici2[4] = { 12, 13, 14, 15 };  // LEDS DE BICI 2
+
+//MCP23017 2
+const int botsBici3[4] = { 0, 1, 2, 3 };      // PULSADORES DE BICI 3
+const int ledsBici3[4] = { 8, 9, 10, 11 };    // LEDS DE BICI 3
+const int botsBici4[4] = { 4, 5, 6, 7 };      // PULSADORES DE BICI 4
+const int ledsBici4[4] = { 12, 13, 14, 15 };  // LEDS DE BICI 4
+
+// Medición de velocidad - Sensor de efecto Hall KY-024
+const int numMuestras = 12;  // Número de muestras para calcular el promedio
+
+// Variables para Bici 1
+const int senHallPin1 = 33;  // Sensor de efecto Hall bici 1
+volatile int contadorPulsos1 = 0;
+float Radio1 = 0.36195;
+float muestrasDeVel1[numMuestras];
+int muestras1 = 0;
+volatile unsigned long ultimoPulso1 = 0;
+
+// Variables para Bici 2
+const int senHallPin2 = 34;  // Sensor de efecto Hall bici 2
+volatile int contadorPulsos2 = 0;
+float Radio2 = 0.36195;
+float muestrasDeVel2[numMuestras];
+int muestras2 = 0;
+const unsigned long intervaloBici2 = 500;
+
+// Variables para Bici 3
+const int senHallPin3 = 32;  // Sensor de efecto Hall bici 3
+volatile int contadorPulsos3 = 0;
+float Radio3 = 0.36195;
+float muestrasDeVel3[numMuestras];
+int muestras3 = 0;
+volatile unsigned long ultimoPulso3 = 0;
+
+// Variables para Bici 4
+const int senHallPin4 = 35;  // Sensor de efecto Hall bici 4
+volatile int contadorPulsos4 = 0;
+float Radio4 = 0.36195;
+float muestrasDeVel4[numMuestras];
+int muestras4 = 0;
+volatile unsigned long ultimoPulso4 = 0;
+
+// Constantes
+const float pi = 3.1416;
+const float factorDeConversion = 3.6;
+const unsigned long intervalo = 1000;
+const unsigned long antirreboteDelay = 100;
+
+unsigned long lastTime1 = 0;
+unsigned long lastTime2 = 0;
+unsigned long lastTime3 = 0;
+unsigned long lastTime4 = 0;
+
+float velProm1 = 0.0;
+float velProm2 = 0.0;
+float velProm3 = 0.0;
+float velProm4 = 0.0;
+
+void IRAM_ATTR interContadorPulsos1() {
+  unsigned long actualPulso1 = millis ();
+  if (actualPulso1 - ultimoPulso1 > antirreboteDelay) {
+    contadorPulsos1++;
+    ultimoPulso1 = actualPulso1;
+  }
+}
+
+void IRAM_ATTR interContadorPulsos2() {
+    contadorPulsos2++; 
+}
+
+void IRAM_ATTR interContadorPulsos3() {
+  unsigned long actualPulso3 = millis ();
+  if (actualPulso3 - ultimoPulso3 > antirreboteDelay) {
+    contadorPulsos3++;
+    ultimoPulso3 = actualPulso3;
+  }
+}
+
+void IRAM_ATTR interContadorPulsos4() {
+  unsigned long actualPulso4 = millis ();
+  if (actualPulso4 - ultimoPulso4 > antirreboteDelay) {
+    contadorPulsos4++;
+    ultimoPulso4 = actualPulso4;
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  SerialBT.begin("BCPENSANTE");
+  Serial.println("ESP32 lista para emparejar");
+
+  Wire.begin(21, 22);
+
+  // Inicialización del MCP23017
+  if (!mcp2.begin_I2C(0x20)) {
+    Serial.println("No se encontró el MCP23017 en la dirección 0x20");
+    while (1)
+      ;
+  }
+
+  // Inicialización del MCP23017
+  if (!mcp1.begin_I2C(0x21)) {
+    Serial.println("No se encontró el MCP23017 en la dirección 0x21");
+    while (1)
+      ;
+  }
+
+  pinMode(senHallPin1, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(senHallPin1), interContadorPulsos1, FALLING);
+
+  pinMode(senHallPin2, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(senHallPin2), interContadorPulsos2, FALLING);
+
+  pinMode(senHallPin3, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(senHallPin3), interContadorPulsos3, FALLING);
+
+  pinMode(senHallPin4, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(senHallPin4), interContadorPulsos4, FALLING);
+
+  // Configuración de los pines de los pulsadores y LEDs
+  for (int i = 0; i < 4; i++) {
+    mcp1.pinMode(botsBici1[i], INPUT);   // Pulsadores Bici 1
+    activarPullUp1(botsBici1[i]);        // Activar resistencias pull-up
+    mcp1.pinMode(ledsBici1[i], OUTPUT);  // LEDs Bici 1
+
+    mcp1.pinMode(botsBici2[i], INPUT);   // Pulsadores Bici 2
+    activarPullUp1(botsBici2[i]);        // Activar resistencias pull-up
+    mcp1.pinMode(ledsBici2[i], OUTPUT);  // LEDs Bici 2
+
+    mcp2.pinMode(botsBici3[i], INPUT);   // Pulsadores Bici 3
+    activarPullUp2(botsBici3[i]);        // Activar resistencias pull-up
+    mcp2.pinMode(ledsBici3[i], OUTPUT);  // LEDs Bici 3
+
+    mcp2.pinMode(botsBici4[i], INPUT);   // Pulsadores Bici 4
+    activarPullUp2(botsBici4[i]);        // Activar resistencias pull-up
+    mcp2.pinMode(ledsBici4[i], OUTPUT);  // LEDs Bici 4
+  }
+
+
+  // Inicializar las muestras de velocidad
+  for (int i = 0; i < numMuestras; i++) {
+    muestrasDeVel1[i] = 0.0;
+    muestrasDeVel2[i] = 0.0;
+    muestrasDeVel3[i] = 0.0;
+    muestrasDeVel4[i] = 0.0;
+  }
+
+  SerialBT.println("CONEXION: Conectado a ESP32");
+}
+
+void activarPullUp1(int pin) {
+  //Lee el estado actual del registro GPPUA
+  Wire.beginTransmission(0X21);  // Direccion del MCP23017
+  Wire.write(0X0C);              // Activa el pull up en los pines A del MCP23017
+  Wire.endTransmission();
+  Wire.requestFrom(0X21, 1);  // Solicita el valor actual del registro
+  uint8_t gppua = Wire.read();
+
+  // Activar la resistencia pull-up en el pin correspondiente
+  gppua |= (1 << pin);  // Modifica bit
+
+  //Escribe el nuevo valor del registro
+  Wire.beginTransmission(0X21);
+  Wire.write(0X0C);   // Registro
+  Wire.write(gppua);  // Escribe el valor actualizado en el registro
+  Wire.endTransmission();
+}
+
+void activarPullUp2(int pin) {
+  //Lee el estado actual del registro GPPUA
+  Wire.beginTransmission(0X20);  // Direccion del MCP23017
+  Wire.write(0X0C);              // Activa el pull up en los pines A del MCP23017
+  Wire.endTransmission();
+  Wire.requestFrom(0X20, 1);  // Solicita el valor actual del registro
+  uint8_t gppua = Wire.read();
+
+  // Activar la resistencia pull-up en el pin correspondiente
+  gppua |= (1 << pin);  // Modifica bit
+
+  //Escribe el nuevo valor del registro
+  Wire.beginTransmission(0X20);
+  Wire.write(0X0C);   // Registro
+  Wire.write(gppua);  // Escribe el valor actualizado en el registro
+  Wire.endTransmission();
+}
+   void loop() {
+
+  int estadoBotsBici1[4];
+  int estadoBotsBici2[4];
+  int estadoBotsBici3[4];
+  int estadoBotsBici4[4];
+  int contadorBici1 = 0;
+  int contadorBici2 = 0;
+  int contadorBici3 = 0;
+  int contadorBici4 = 0;
+
+  unsigned long currentTime = millis();
+
+  // Leer los estados de los pulsadores
+  for (int i = 0; i < 4; i++) {
+    estadoBotsBici1[i] = mcp1.digitalRead(botsBici1[i]);
+    if (estadoBotsBici1[i] == LOW) contadorBici1++;
+
+    estadoBotsBici2[i] = mcp1.digitalRead(botsBici2[i]);
+    if (estadoBotsBici2[i] == LOW) contadorBici2++;
+
+    estadoBotsBici3[i] = mcp2.digitalRead(botsBici3[i]);
+    if (estadoBotsBici3[i] == LOW) contadorBici3++;
+
+    estadoBotsBici4[i] = mcp2.digitalRead(botsBici4[i]);
+    if (estadoBotsBici4[i] == LOW) contadorBici4++;
+  }
+
+  // Si más de un pulsador está presionado, apagar ambos LEDs
+  if (contadorBici1 > 1 || contadorBici2 > 1 || contadorBici3 > 1 || contadorBici4 > 1) {
+    for (int i = 0; i < 4; i++) {
+      mcp1.digitalWrite(ledsBici1[i], LOW);
+      mcp1.digitalWrite(ledsBici2[i], LOW);
+      mcp2.digitalWrite(ledsBici3[i], LOW);
+      mcp2.digitalWrite(ledsBici4[i], LOW);
+    }
+  } else {
+    for (int i = 0; i < 4; i++) {
+      if (estadoBotsBici1[i] == LOW) {
+        mcp1.digitalWrite(ledsBici1[i], HIGH);
+        Serial.print("Pulsador ");
+        Serial.print(i + 1);
+        Serial.println(" activado || Bici 1");
+      } else {
+        mcp1.digitalWrite(ledsBici1[i], LOW);
+      }
+
+      if (estadoBotsBici2[i] == LOW) {
+        mcp1.digitalWrite(ledsBici2[i], HIGH);  // Enceiede el led si el puslador esta presionado
+        Serial.print("Pulsador ");
+        Serial.print(i + 1);
+        Serial.println(" activado || Bici 2");
+      } else {
+        mcp1.digitalWrite(ledsBici2[i], LOW);  // Apaga el led si no se esta presionandno el pulsador
+      }
+
+      if (estadoBotsBici3[i] == LOW) {
+        mcp2.digitalWrite(ledsBici3[i], HIGH);  // Enceiede el led si el puslador esta presionado
+        Serial.print("Pulsador ");
+        Serial.print(i + 1);
+        Serial.println(" activado || Bici 3");
+      } else {
+        mcp2.digitalWrite(ledsBici3[i], LOW);  // Apaga el led si no se esta presionandno el pulsador
+      }
+
+      if (estadoBotsBici4[i] == LOW) {
+        mcp2.digitalWrite(ledsBici4[i], HIGH);  // Enceiede el led si el puslador esta presionado
+        Serial.print("Pulsador ");
+        Serial.print(i + 1);
+        Serial.println(" activado || Bici 4");
+      } else {
+        mcp2.digitalWrite(ledsBici4[i], LOW);  // Apaga el led si no se esta presionandno el pulsador
+      }
+    }
+  }
+
+  String pulsadoresData = "B1:";
+  for (int i = 0; i < 4; i++) {
+    estadoBotsBici1[i] = mcp1.digitalRead(botsBici1[i]);
+    pulsadoresData += estadoBotsBici1[i] == LOW ? "1" : "0";
+  }
+
+  pulsadoresData += "B2:";
+  for (int i = 0; i < 4; i++) {
+    estadoBotsBici2[i] = mcp1.digitalRead(botsBici2[i]);
+    pulsadoresData += estadoBotsBici2[i] == LOW ? "1" : "0";
+  }
+
+  pulsadoresData += "B3:";
+  for (int i = 0; i < 4; i++) {
+    estadoBotsBici3[i] = mcp2.digitalRead(botsBici3[i]);
+    pulsadoresData += estadoBotsBici3[i] == LOW ? "1" : "0";
+  }
+
+  pulsadoresData += "B4:";
+  for (int i = 0; i < 4; i++) {
+    estadoBotsBici4[i] = mcp2.digitalRead(botsBici4[i]);
+    pulsadoresData += estadoBotsBici4[i] == LOW ? "1" : "0";
+  }
+
+  // CALCULO VELOCIDAD BICI 1
+  if (currentTime - lastTime1 >= intervalo) {
+
+    float circunferenciaRueda1 = 2 * pi * Radio1;
+    float velocidadMs1 = (contadorPulsos1 * circunferenciaRueda1) / (intervalo / 1000.0);
+    float velocidadKmh1 = velocidadMs1 * factorDeConversion;
+
+    muestrasDeVel1[muestras1] = velocidadKmh1;
+    muestras1 = (muestras1 + 1) % numMuestras;
+
+
+    for (int i = 0; i < numMuestras; i++) {
+      velProm1 += muestrasDeVel1[i];
+    }
+
+    velProm1 /= numMuestras;
+
+
+    contadorPulsos1 = 0;
+    lastTime1 = currentTime;
+  }
+
+  // CALCULO VELOCIDAD BICI 2
+
+  if (currentTime - lastTime2 >= intervaloBici2) {
+
+    float circunferenciaRueda2 = 2 * pi * Radio2;
+    float velocidadMs2 = (contadorPulsos2 * circunferenciaRueda2) / (intervaloBici2 / 1000.0);
+    float velocidadKmh2 = velocidadMs2 * factorDeConversion;
+
+    muestrasDeVel2[muestras2] = velocidadKmh2;
+    muestras2 = (muestras2 + 1) % numMuestras;
+
+
+    for (int i = 0; i < numMuestras; i++) {
+      velProm2 += muestrasDeVel2[i];
+    }
+
+    velProm2 /= numMuestras;
+    contadorPulsos2 = 0;
+    lastTime2 = currentTime;
+  }
+
+  // CALCULO VELOCIDAD BICI 3
+
+  if (currentTime - lastTime3 >= intervalo) {
+
+    float circunferenciaRueda3 = 2 * pi * Radio3;
+    float velocidadMs3 = (contadorPulsos3 * circunferenciaRueda3) / (intervalo / 1000.0);
+    float velocidadKmh3 = velocidadMs3 * factorDeConversion;
+
+    muestrasDeVel3[muestras3] = velocidadKmh3;
+    muestras3 = (muestras3 + 1) % numMuestras;
+
+
+    for (int i = 0; i < numMuestras; i++) {
+      velProm3 += muestrasDeVel3[i];
+    }
+
+    velProm3 /= numMuestras;
+    contadorPulsos3 = 0;
+    lastTime3 = currentTime;
+
+    
+  }
+
+  // CALCULO VELOCIDAD BICI 4
+
+  if (currentTime - lastTime4 >= intervalo) {
+
+    float circunferenciaRueda4 = 2 * pi * Radio4;
+    float velocidadMs4 = (contadorPulsos4 * circunferenciaRueda4) / (intervalo / 1000.0);
+    float velocidadKmh4 = velocidadMs4 * factorDeConversion;
+
+    muestrasDeVel4[muestras4] = velocidadKmh4;
+    muestras4 = (muestras4 + 1) % numMuestras;
+
+
+    for (int i = 0; i < numMuestras; i++) {
+      velProm4 += muestrasDeVel4[i];
+    }
+
+    velProm4 /= numMuestras;
+
+
+    String data = pulsadoresData + " " + String(velProm1, 1) + "  " + String(velProm2, 1) + "  " + String(velProm3, 1) + "  " + String(velProm4, 1);
+    SerialBT.println(data);
+    Serial.println(data);
+    delay (50);
+
+    contadorPulsos4 = 0;
+    lastTime4 = currentTime;
+  }
+}
