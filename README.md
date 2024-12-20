@@ -12,4 +12,4 @@ Nota: La transmision y recepcion de datos se realiza mediante cable UTP y conect
 Se desarrollo APP en android studio koala con kotlin 
 El codigo del microcontrolador se desarrollo en Arduino IDE 2.3.3
 
-EN DRIVE SE TIENEN MAS DETALLES ACERCA DEL PROYECTO EN SI 
+EN DRIVE SE TIENEN MAS DETALLES ACERCA DEL PROYECTO 
