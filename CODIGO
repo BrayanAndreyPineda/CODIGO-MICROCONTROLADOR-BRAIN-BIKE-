@@ -32,6 +32,7 @@ float Radio1 = 0.36195;
 float muestrasDeVel1[numMuestras];
 int muestras1 = 0;
 volatile unsigned long ultimoPulso1 = 0;
+unsigned long tiempoSinPulsosB1 = 3000;
 
 // Variables para Bici 2
 const int senHallPin2 = 34;  // Sensor de efecto Hall bici 2
@@ -39,7 +40,8 @@ volatile int contadorPulsos2 = 0;
 float Radio2 = 0.36195;
 float muestrasDeVel2[numMuestras];
 int muestras2 = 0;
-const unsigned long intervaloBici2 = 500;
+volatile unsigned long ultimoPulso2 = 0;
+unsigned long tiempoSinPulsosB2 = 3000;
 
 // Variables para Bici 3
 const int senHallPin3 = 32;  // Sensor de efecto Hall bici 3
@@ -48,6 +50,7 @@ float Radio3 = 0.36195;
 float muestrasDeVel3[numMuestras];
 int muestras3 = 0;
 volatile unsigned long ultimoPulso3 = 0;
+unsigned long tiempoSinPulsosB3 = 4000;
 
 // Variables para Bici 4
 const int senHallPin4 = 35;  // Sensor de efecto Hall bici 4
@@ -56,12 +59,13 @@ float Radio4 = 0.36195;
 float muestrasDeVel4[numMuestras];
 int muestras4 = 0;
 volatile unsigned long ultimoPulso4 = 0;
+unsigned long tiempoSinPulsosB4 = 3000;
 
 // Constantes
 const float pi = 3.1416;
 const float factorDeConversion = 3.6;
 const unsigned long intervalo = 1000;
-const unsigned long antirreboteDelay = 100;
+const unsigned long antirreboteDelay = 50;
 
 unsigned long lastTime1 = 0;
 unsigned long lastTime2 = 0;
@@ -82,7 +86,11 @@ void IRAM_ATTR interContadorPulsos1() {
 }
 
 void IRAM_ATTR interContadorPulsos2() {
+  unsigned long actualPulso2 = millis ();
+  if (actualPulso2 - ultimoPulso2 > antirreboteDelay) {
     contadorPulsos2++; 
+    ultimoPulso2 = actualPulso2;
+  }
 }
 
 void IRAM_ATTR interContadorPulsos3() {
@@ -102,7 +110,7 @@ void IRAM_ATTR interContadorPulsos4() {
 }
 
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(460800);
   SerialBT.begin("BCPENSANTE");
   Serial.println("ESP32 lista para emparejar");
 
@@ -118,8 +126,7 @@ void setup() {
   // Inicialización del MCP23017
   if (!mcp1.begin_I2C(0x21)) {
     Serial.println("No se encontró el MCP23017 en la dirección 0x21");
-    while (1)
-      ;
+    while (1);
   }
 
   pinMode(senHallPin1, INPUT_PULLUP);
@@ -161,7 +168,6 @@ void setup() {
     muestrasDeVel3[i] = 0.0;
     muestrasDeVel4[i] = 0.0;
   }
-
   SerialBT.println("CONEXION: Conectado a ESP32");
 }
 
@@ -314,20 +320,32 @@ void activarPullUp2(int pin) {
     for (int i = 0; i < numMuestras; i++) {
       velProm1 += muestrasDeVel1[i];
     }
-
     velProm1 /= numMuestras;
 
+    
+      if (currentTime - ultimoPulso1 > tiempoSinPulsosB1) {
+      velProm1 *= 0.9; 
+
+     if (velProm1 < 0.5) {
+      velProm1 = 0.0;
+
+      for (int i = 0; i < numMuestras; i++) {
+        muestrasDeVel1[i] = 0.0;
+      }
+     }
+    }
 
     contadorPulsos1 = 0;
     lastTime1 = currentTime;
   }
 
+    
   // CALCULO VELOCIDAD BICI 2
 
-  if (currentTime - lastTime2 >= intervaloBici2) {
+  if (currentTime - lastTime2 >= intervalo) {
 
     float circunferenciaRueda2 = 2 * pi * Radio2;
-    float velocidadMs2 = (contadorPulsos2 * circunferenciaRueda2) / (intervaloBici2 / 1000.0);
+    float velocidadMs2 = (contadorPulsos2 * circunferenciaRueda2) / (intervalo / 1000.0);
     float velocidadKmh2 = velocidadMs2 * factorDeConversion;
 
     muestrasDeVel2[muestras2] = velocidadKmh2;
@@ -337,8 +355,21 @@ void activarPullUp2(int pin) {
     for (int i = 0; i < numMuestras; i++) {
       velProm2 += muestrasDeVel2[i];
     }
-
     velProm2 /= numMuestras;
+
+    
+      if (currentTime - ultimoPulso2 > tiempoSinPulsosB2) {
+      velProm2*= 0.9; 
+
+     if (velProm2 < 0.5) {
+      velProm2 = 0.0;
+
+      for (int i = 0; i < numMuestras; i++) {
+        muestrasDeVel2[i] = 0.0;
+      }
+     }
+    }
+
     contadorPulsos2 = 0;
     lastTime2 = currentTime;
   }
@@ -358,12 +389,21 @@ void activarPullUp2(int pin) {
     for (int i = 0; i < numMuestras; i++) {
       velProm3 += muestrasDeVel3[i];
     }
-
     velProm3 /= numMuestras;
+
+      if (currentTime - ultimoPulso3 > tiempoSinPulsosB3) {
+      velProm3 *= 0.9; 
+
+     if (velProm3 < 0.5) {
+      velProm3 = 0.0;
+
+      for (int i = 0; i < numMuestras; i++) {
+        muestrasDeVel3[i] = 0.0;
+      }
+     }
+    }
     contadorPulsos3 = 0;
     lastTime3 = currentTime;
-
-    
   }
 
   // CALCULO VELOCIDAD BICI 4
@@ -381,11 +421,22 @@ void activarPullUp2(int pin) {
     for (int i = 0; i < numMuestras; i++) {
       velProm4 += muestrasDeVel4[i];
     }
-
     velProm4 /= numMuestras;
 
+    
+      if (currentTime - ultimoPulso4 > tiempoSinPulsosB4) {
+      velProm4 *= 0.9; 
 
-    String data = pulsadoresData + " " + String(velProm1, 1) + "  " + String(velProm2, 1) + "  " + String(velProm3, 1) + "  " + String(velProm4, 1);
+     if (velProm4 < 0.5) {
+      velProm4 = 0.0;
+
+      for (int i = 0; i < numMuestras; i++) {
+        muestrasDeVel4[i] = 0.0;
+      }
+     }
+    }
+
+    String data = pulsadoresData + " " + String(velProm1, 1) + "  " + String(velProm2, 1) + "  " + String(velProm3, 1) + "  " + String(velProm4, 1) + "\n";
     SerialBT.println(data);
     Serial.println(data);
     delay (50);
